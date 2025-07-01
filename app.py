@@ -1,5 +1,5 @@
 from flask_session import Session
-from flask import Flask, redirect, url_for, session, request, render_template
+from flask import Flask, redirect, url_for, session, request, render_template,abort
 from authlib.integrations.flask_client import OAuth
 from datetime import datetime
 import gspread
@@ -11,6 +11,19 @@ app = Flask(__name__)
 app.config['SESSION_TYPE'] = 'filesystem'
 app.secret_key = "nomeacuerdo123"
 Session(app)
+
+def ip_permitida():
+    ip = request.remote_addr
+    print(f"IP detectada: {ip}")  # <- Agregado para debug
+    if ip == "127.0.0.1":  # Acceso local permitido
+        return True
+    if ip.startswith("10.66.118."):
+        try:
+            ultimo = int(ip.split(".")[3])
+            return 1 <= ultimo <= 200
+        except:
+            return False
+    return False
 
 # --------------------------
 # Login con Google (OAuth)
@@ -24,9 +37,7 @@ google = oauth.register(
     client_id=client_info['client_id'],
     client_secret=client_info['client_secret'],
     server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-    client_kwargs={
-        'scope': 'openid email profile'
-    }
+    client_kwargs={'scope': 'openid email profile'}
 )
 
 
@@ -41,22 +52,26 @@ sheet = client.open("Fichada").sheet1
 # --------------------------
 @app.route("/")
 def index():
+    if not ip_permitida():
+        abort(403)
     if "email" in session:
         return render_template("home.html", email=session["email"])
     return render_template("index.html")
 
 @app.route("/login")
 def login():
+    if not ip_permitida():
+        abort(403)
     return google.authorize_redirect(redirect_uri="http://127.0.0.1:5000/auth/callback")
 
 @app.route("/auth/callback")
 def callback():
+    if not ip_permitida():
+        abort(403)
     token = google.authorize_access_token()
     userinfo = google.get('https://openidconnect.googleapis.com/v1/userinfo').json()
     session["email"] = userinfo["email"]
     return redirect("/")
-
-
 
 @app.route("/logout")
 def logout():
@@ -65,6 +80,8 @@ def logout():
 
 @app.route("/fichar/<accion>")
 def fichar(accion):
+    if not ip_permitida():
+        abort(403)
     if "email" not in session:
         return redirect(url_for("index"))
     
@@ -79,7 +96,14 @@ def fichar(accion):
     # Guardar en Google Sheets
     sheet.append_row([email, accion, fecha, hora, ip])
 
-    return f"{accion} registrado para {email} a las {hora} desde {ip}"
+    return render_template(
+        "fichada_resultado.html",
+        accion=accion.capitalize(),
+        email=email,
+        ip=ip,
+        hora=hora,
+        fecha=fecha
+    )
 
 if __name__ == "__main__":
     app.run(debug=True)

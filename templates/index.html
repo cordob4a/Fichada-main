@@ -1,8 +1,16 @@
 <!DOCTYPE html>
 <html lang="es">
-<head><meta charset="UTF-8"><title>Fichada</title></head>
+<head>
+    <meta charset="UTF-8">
+    <title>Fichada</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
 <body>
-    <h2>Bienvenido al sistema de fichada</h2>
-    <a href="/login">Iniciar sesión con Google</a>
+    <div>
+        <img src="{{ url_for('static', filename='logo.png') }}" alt="Logo CTL" class="logo">
+        <h2>Bienvenido al sistema de fichada</h2>
+        <a href="/login">Iniciar sesión con Google</a>
+    </div>
 </body>
 </html>
+
