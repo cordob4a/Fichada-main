@@ -4,6 +4,7 @@ from authlib.integrations.flask_client import OAuth
 from datetime import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime, timedelta
 import os
 import json
 
@@ -14,17 +15,20 @@ Session(app)
 
 def ip_permitida():
     ip = request.remote_addr
-    print(f"IP detectada: {ip}")  # <- Agregado para debug
+
     if ip == "127.0.0.1":  # Acceso local permitido
         return True
-    if ip.startswith("10.66.118."):
+    partes = ip.split(".")
+    if len(partes) != 4:
+        return False
+    if partes[0] == "10" and partes[1] == "66":
         try:
-            ultimo = int(ip.split(".")[3])
-            return 1 <= ultimo <= 200
-        except:
+            x1 = int (partes[2])
+            x2 = int (partes[3])
+            return 100 <= x1 <= 300 and 100 <= x2 <= 300
+        except ValueError:
             return False
     return False
-
 # --------------------------
 # Login con Google (OAuth)
 # --------------------------
@@ -47,9 +51,25 @@ creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", sco
 client = gspread.authorize(creds)
 sheet = client.open("Fichada").sheet1
 
-# --------------------------
-# Rutas
-# --------------------------
+filas = sheet.get_all_values()
+
+fecha_limite = datetime.now() - timedelta(days=60)
+
+nuevas_filas =[filas[0]]
+
+for fila in filas[1:]:
+    try: 
+        fecha_str=fila[2]
+        fecha = datetime.strptime(fecha_str, "%d/%m/%Y")
+        if fecha >= fecha_limite:
+            nuevas_filas.append(fila)
+
+    except:
+        pass
+
+sheet.clear()
+sheet.append_rows(nuevas_filas)
+
 @app.route("/")
 def index():
     if not ip_permitida():
@@ -89,20 +109,63 @@ def fichar(accion):
     fecha = datetime.now().strftime("%d/%m/%Y")
     hora = datetime.now().strftime("%H:%M:%S")
     ip = request.remote_addr
+    ubicacion = "Parque Patricios" if ip.startswith("10.66") else ip
 
     if accion not in ["Ingreso", "Salida"]:
         return "Acción no válida."
 
     # Guardar en Google Sheets
-    sheet.append_row([email, accion, fecha, hora, ip])
+    sheet.append_row([email, accion, fecha, hora, ubicacion])
 
     return render_template(
         "fichada_resultado.html",
         accion=accion.capitalize(),
         email=email,
-        ip=ip,
+        ubicacion=ubicacion,
         hora=hora,
         fecha=fecha
+    )
+@app.route("/historial", methods=["GET", "POST"])
+def historial():
+    if not ip_permitida():
+        abort(403)
+    if "email" not in session:
+        return redirect(url_for("index"))
+
+    email = session["email"]
+    registros = sheet.get_all_records()
+    es_admin = email == "vicente.sosa@ctl.com.ar","julian.cordoba@ctl.com.ar"
+    correos_unicos = sorted(set(r['Nombre'] for r in registros))
+
+    filtro = ""
+    desde = ""
+    hasta = ""
+
+    if request.method == "POST":
+        filtro = request.form.get("email", "")
+        desde = request.form.get("desde", "")
+        hasta = request.form.get("hasta", "")
+
+        if filtro:
+            registros = [r for r in registros if r['Nombre'] == filtro]
+
+        if desde:
+            registros = [r for r in registros if r['Fecha'] >= datetime.strptime(desde, "%Y-%m-%d").strftime("%d/%m/%Y")]
+        if hasta:
+            registros = [r for r in registros if r['Fecha'] <= datetime.strptime(hasta, "%Y-%m-%d").strftime("%d/%m/%Y")]
+    else:
+        if not es_admin:
+            registros = [r for r in registros if r['Nombre'] == email]
+
+    return render_template(
+        "historial.html",
+        registros=registros,
+        es_admin=es_admin,
+        emails=correos_unicos,
+        filtro=filtro,
+        desde=desde,
+        hasta=hasta,
+        email=email
     )
 
 if __name__ == "__main__":
